@@ -1,5 +1,4 @@
-#### Lesson 2: Notes
-1. 
+# Lesson: Record Count & Dsitcint Values
 
 ### Record Counts & Distinct Values
 We can use COUNT(*) count total records in a table. Keep in mind it doesnt check for nulls. We use Alias to rename expression. 
@@ -20,6 +19,7 @@ One way to think of the GROUP BY is to imagine our dataset being divided into di
 2. nce we have split the dataset into the groups specified for the GROUP BY we then apply the aggregate function within each of these grouped datasets to condense our output to a single row from each group.
 3. Mathematical aggregate functions to GROUP BY example such as SUM, MEAN, STDDEV, MAX and MIN
 4. Once the calculations are complete for each separate group, the condensed 1 row from each group is then combined together to form the final output for the original SQL statement with the GROUP BY clause. 
+5. When we use GROUP BY on 2+ columns, the subsequent COUNT function will aggregate the records based off the unique combination of values in these columns instead of just a single 1.
 
  (Only 1 row is returned for each group. In any query while selecting, non aggregate columns needs to go in a GROUP BY clause) 
 
@@ -52,3 +52,45 @@ FROM dvd_rentals.film_list
 GROUP BY rating
 ORDER BY frequency DESC;
 ``` 
+
+## Example: 
+
+Q: How many rows are there in the film_list table?
+
+```SQL 
+SELECT count(*) as row_count
+FROM dvd_rentals.film_list;
+```
+
+Q: What are the unique values for the rating column in the film table?
+
+```SQL 
+SELECT distinct rating 
+FROM dvd_rentals.film_list;
+```
+
+Q: How many unique category values are there in the film_list table?
+
+```SQL 
+SELECT count(distinct category)
+FROM dvd_rentals.film_list;
+```
+
+Q: What is the frequency of values in the rating column in the film_list table?
+
+``` SQL 
+SELECT rating, count(*) as Frequency
+FROM dvd_rentals.film_list
+GROUP BY rating
+ORDER BY 2 DESC;
+```
+
+Q: What are the 5 most frequent rating and category combinations in the film_list table?
+
+```SQL 
+SELECT rating, category, count(*) as frequency
+FROM dvd_rentals.film_list
+GROUP BY rating, category
+ORDER BY 3 DESC
+LIMIT 5; 
+```

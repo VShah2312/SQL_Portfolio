@@ -1,4 +1,4 @@
-#  Exercise 1: Select and Sort
+#  Exercise: Select and Sort
 
 
 Q: What is the name of the category with the highest category_id in the dvd_rentals.category table?
