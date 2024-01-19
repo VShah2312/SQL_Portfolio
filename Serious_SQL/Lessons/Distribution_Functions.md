@@ -45,8 +45,9 @@ This is when cumulative distrubtion function comes to rescue.
 ### Cumulative Distribution Function: 
 
 In mathematical terms, a cumulative distribution function takes a value and returns us the percentile or in other words: the probability of any value between the minimum value of our dataset X and the value V as shown below:
-
+$$
 F(V)=∫Vmin(X)f(x)dx=Pr[min(X)≤x≤V]
+$$
 
 The beautiful thing about probabilities is that they always add up to 1!
 
