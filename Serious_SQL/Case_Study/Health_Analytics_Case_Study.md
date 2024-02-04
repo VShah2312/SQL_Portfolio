@@ -1,4 +1,4 @@
-# Health Analytics Mini Case Study: 
+# Health Analytics Mini Case Study
 
 We’ve just received an urgent request from the General Manager of Analytics at Health Co requesting our assistance with their analysis of the health.user_logs dataset.
 
