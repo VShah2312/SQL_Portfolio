@@ -8,6 +8,8 @@ We have been asked to support the customer analytics team at DVD Rental Co who h
 
 Throughout this marketing case study we will cover many SQL data manipulation and analysis techniques. The aim is to further extend your SQL knowledge base and also expose you to some scenarios where you can apply some neat tricks that I’ve picked up over the years!
 
+![Alt text](Unknown-1.png)
+
 ### Key Business Requirements
 
 The marketing team have shared with us requirements of the email they wish to send to their customers.
@@ -118,3 +120,354 @@ The key columns that we will need to generate include the following data points 
 * category_percentage: What proportion of total films watched does this category make up?
 
 
+## Scripting Solution: 
+
+#### P - Problem
+What is the business problem and what sort of value can we generate by solving it?
+
+#### E - Exploration
+What available resources do we have and what initial data exploration can we perform to better understand our data?
+
+Here is a sample of the analysis we completed for our exploration of the dvd_rentals.rental and dvd_rentals.inventory tables:
+
+#### Category Insights: 
+
+1. Perform an anti join to check which column values exist in dvd_rentals.rental but not in dvd_rentals.inventory
+
+```SQL
+-- how many foreign keys only exist in the left table and not in the right?
+SELECT
+  COUNT(DISTINCT rental.inventory_id)
+FROM dvd_rentals.rental
+WHERE NOT EXISTS (
+  SELECT inventory_id
+  FROM dvd_rentals.inventory
+  WHERE rental.inventory_id = inventory.inventory_id
+); 
+```
+
+```SQL 
+-- how many foreign keys only exist in the right table and not in the left?
+-- note the table reference changes
+SELECT
+  COUNT(DISTINCT inventory.inventory_id)
+FROM dvd_rentals.inventory
+WHERE NOT EXISTS (
+  SELECT inventory_id
+  FROM dvd_rentals.rental
+  WHERE rental.inventory_id = inventory.inventory_id
+);
+```
+There seems to be a single value which is not showing up - let’s investigate which film it is:
+
+```SQL 
+SELECT *
+FROM dvd_rentals.inventory
+WHERE NOT EXISTS (
+  SELECT inventory_id
+  FROM dvd_rentals.rental
+  WHERE rental.inventory_id = inventory.inventory_id
+);
+```
+Conclusion: although there is a single inventory_id record which is missing from the dvd_rentals.rental table - there might be no issues with this discrepancy as it seems that some inventory might just never be rented out to customers at the retail rental stores.
+
+Finally - let’s confirm that both left and inner joins do not differ at all when we look at the resulting row counts from the joint tables:
+
+```SQL 
+DROP TABLE IF EXISTS left_rental_join;
+CREATE TEMP TABLE left_rental_join AS
+SELECT
+  rental.customer_id,
+  rental.inventory_id,
+  inventory.film_id
+FROM dvd_rentals.rental
+LEFT JOIN dvd_rentals.inventory
+  ON rental.inventory_id = inventory.inventory_id;
+
+DROP TABLE IF EXISTS inner_rental_join;
+CREATE TEMP TABLE inner_rental_join AS
+SELECT
+  rental.customer_id,
+  rental.inventory_id,
+  inventory.film_id
+FROM dvd_rentals.rental
+INNER JOIN dvd_rentals.inventory
+  ON rental.inventory_id = inventory.inventory_id;
+
+-- Output SQL
+(
+  SELECT
+    'left join' AS join_type,
+    COUNT(*) AS record_count,
+    COUNT(DISTINCT inventory_id) AS unique_key_values
+  FROM left_rental_join
+)
+UNION
+(
+  SELECT
+    'inner join' AS join_type,
+    COUNT(*) AS record_count,
+    COUNT(DISTINCT inventory_id) AS unique_key_values
+  FROM inner_rental_join
+);
+```
+We also need to investigate the relationships between the actor_id and film_id columns within the dvd_rentals.film_actor table.
+
+Intuitively - we can hypothesise that one single actor might show up in multiple films and one film can have multiple actors. This is known as a many-to-many relationship.
+
+Let’s perform some analysis on the data tables to see if our hunch is on point:
+
+```SQL 
+WITH actor_film_counts AS (
+  SELECT
+    actor_id,
+    COUNT(DISTINCT film_id) AS film_count
+  FROM dvd_rentals.film_actor
+  GROUP BY actor_id
+)
+SELECT
+  film_count,
+  COUNT(*) AS total_actors
+FROM actor_film_counts
+GROUP BY film_count
+ORDER BY film_count DESC;
+```
+Let’s also confirm that there are multiple actors per film also (although this should be pretty obvious!):
+
+```SQL 
+WITH film_actor_counts AS (
+  SELECT
+    film_id,
+    COUNT(DISTINCT actor_id) AS actor_count
+  FROM dvd_rentals.film_actor
+  GROUP BY film_id
+)
+SELECT
+  actor_count,
+  COUNT(*) AS total_films
+FROM film_actor_counts
+GROUP BY actor_count
+ORDER BY actor_count DESC;
+```
+#### A - Analysis
+This is where we start showing off our arsenal of data analysis techniques in a very structured and systematic manner.
+
+1. Create a base dataset and join all relevant tables
+
+```SQL 
+DROP TABLE IF EXISTS complete_joint_dataset;
+CREATE TEMP TABLE complete_joint_dataset AS
+SELECT 
+rental.customer_id, 
+inventory.film_id,
+film.title, 
+category.name as category_name,
+ -- also included rental_date for sorting purposes
+rental.rental_date
+FROM dvd_rentals.rental
+INNER JOIN  dvd_rentals.inventory 
+ON rental.inventory_id= inventory.inventory_id
+INNER JOIN dvd_rentals.film
+ON inventory.film_id=film.film_id
+INNER JOIN dvd_rentals.film_category
+ON film.film_id=film_category.film_id
+INNER JOIN dvd_rentals.category
+ON film_category.category_id= category.category_id; 
+```
+
+2. Calculate customer rental counts for each category
+```SQL 
+DROP TABLE IF EXISTS category_counts;
+CREATE TEMP TABLE category_counts AS
+SELECT
+customer_id,
+category_name,
+COUNT(*) AS rental_count,
+MAX(rental_date) AS latest_rental_date
+FROM complete_joint_dataset
+GROUP BY
+customer_id,
+category_name;
+```
+3. Aggregate all customer total films watched
+
+```SQL 
+DROP TABLE IF EXISTS total_counts;
+CREATE TEMP TABLE total_counts AS
+SELECT
+customer_id,
+SUM(rental_count)
+FROM category_counts
+GROUP BY customer_id; 
+```
+
+4. Identify the top 2 categories for each customer
+
+```SQL 
+DROP TABLE IF EXISTS top_categories;
+CREATE TEMP TABLE top_categories AS
+WITH ranked_cte AS (
+  SELECT
+    customer_id,
+    category_name,
+    rental_count,
+    DENSE_RANK() OVER (
+      PARTITION BY customer_id
+      ORDER BY
+        rental_count DESC,
+        latest_rental_date DESC,
+        category_name
+    ) AS category_rank
+  FROM category_counts
+)
+SELECT * FROM ranked_cte
+WHERE category_rank <= 2;
+```
+
+5. Calculate each category’s aggregated average rental count
+
+```SQL
+DROP TABLE IF EXISTS average_category_count;
+CREATE TEMP TABLE average_category_count AS 
+SELECT category_name, FLOOR(AVG(rental_count)) AS category_average
+FROM category_counts
+GROUP BY category_name;  
+```
+6. Calculate the percentile metric for each customer’s top category film count
+
+```SQL 
+DROP TABLE IF EXISTS top_category_percentile;
+CREATE TEMP TABLE top_category_percentile AS
+WITH calculated_cte AS (
+SELECT
+  top_categories.customer_id,
+  top_categories.category_name AS top_category_name,
+  top_categories.rental_count,
+  category_counts.category_name,
+  top_categories.category_rank,
+  PERCENT_RANK() OVER (
+    PARTITION BY category_counts.category_name
+    ORDER BY category_counts.rental_count DESC
+  ) AS raw_percentile_value
+FROM category_counts
+LEFT JOIN top_categories
+  ON category_counts.customer_id = top_categories.customer_id
+)
+SELECT
+  customer_id,
+  category_name,
+  rental_count,
+  category_rank,
+  CASE
+    WHEN ROUND(100 * raw_percentile_value) = 0 THEN 1
+    ELSE ROUND(100 * raw_percentile_value)
+  END AS percentile
+FROM calculated_cte
+WHERE
+  category_rank = 1
+  AND top_category_name = category_name;
+```
+
+7. Generate our first top category insights table using all previously generated tables
+
+```SQL
+ DROP TABLE IF EXISTS first_category_insights;
+CREATE TEMP TABLE first_category_insights AS
+SELECT
+  base.customer_id,
+  base.category_name,
+  base.rental_count,
+  base.rental_count - average.category_average AS average_comparison,
+  base.percentile
+FROM top_category_percentile AS base
+LEFT JOIN average_category_count AS average
+  ON base.category_name = average.category_name;
+```
+
+8. Generate the 2nd category insights
+
+```SQL 
+DROP TABLE IF EXISTS second_category_insights;
+CREATE TEMP TABLE second_category_insights AS
+SELECT
+  top_categories.customer_id,
+  top_categories.category_name,
+  top_categories.rental_count,
+  -- need to cast as NUMERIC to avoid INTEGER floor division!
+  ROUND(
+    100 * top_categories.rental_count::NUMERIC / total_counts.total_count
+  ) AS total_percentage
+FROM top_categories
+LEFT JOIN total_counts
+  ON top_categories.customer_id = total_counts.customer_id
+WHERE category_rank = 2;
+```
+
+#### Category Recommendations:
+
+1. Film counts: 
+
+```SQL 
+DROP TABLE IF EXISTS film_counts;
+CREATE TEMP TABLE film_counts AS
+SELECT DISTINCT
+  film_id,
+  title,
+  category_name,
+  COUNT(*) OVER (
+    PARTITION BY film_id
+  ) AS rental_count
+FROM complete_joint_dataset;
+```
+
+2. Category Film Exclusions
+
+```SQL 
+DROP TABLE IF EXISTS category_film_exclusions;
+CREATE TEMP TABLE category_film_exclusions AS
+SELECT DISTINCT
+  customer_id,
+  film_id
+FROM complete_joint_dataset;
+```
+3. Final Category Recommendations
+
+```SQL 
+DROP TABLE IF EXISTS category_recommendations;
+CREATE TEMP TABLE category_recommendations AS
+WITH ranked_films_cte AS (
+  SELECT
+    top_categories.customer_id,
+    top_categories.category_name,
+    top_categories.category_rank,
+    -- why do we keep this `film_id` column you might ask?
+    -- you will find out later on during the actor level recommendations!
+    film_counts.film_id,
+    film_counts.title,
+    film_counts.rental_count,
+    DENSE_RANK() OVER (
+      PARTITION BY
+        top_categories.customer_id,
+        top_categories.category_rank
+      ORDER BY
+        film_counts.rental_count DESC,
+        film_counts.title
+    ) AS reco_rank
+  FROM top_categories
+  INNER JOIN film_counts
+    ON top_categories.category_name = film_counts.category_name
+  -- This is a tricky anti-join where we need to "join" on 2 different tables!
+  WHERE NOT EXISTS (
+    SELECT 1
+    FROM category_film_exclusions
+    WHERE
+      category_film_exclusions.customer_id = top_categories.customer_id AND
+      category_film_exclusions.film_id = film_counts.film_id
+  )
+)
+SELECT * FROM ranked_films_cte
+WHERE reco_rank <= 3;
+```
+
+#### R - Report
+Once we’ve finished our analysis we want to package up our various code snippets into a single process and generate the final outputs we need to solve our business problem.
